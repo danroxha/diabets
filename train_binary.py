@@ -12,37 +12,61 @@ import matplotlib.pyplot as plt
 import joblib
 import os
 
-# 1. Load Data
-print("Loading data...")
+"""
+TREINAMENTO DO MODELO BINÁRIO - DIABETES TIPO II
+Este script implementa a arquitetura de rede neural profunda (MLP) descrita no artigo:
+'Predição de Risco de Diabetes tipo II via Redes Neurais Profundas: Um Estudo com o Dataset BRFSS 2015'
+"""
+
+# 1. CARREGAMENTO DOS DADOS
+# Utilizamos o dataset BRFSS 2015 (Behavioral Risk Factor Surveillance System)
+print("Carregando dataset...")
 df = pd.read_csv('diabetes_012_health_indicators_BRFSS2015.csv')
 
-# 2. Convert to Binary Classification (0: No Diabetes, 1: Prediabetes/Diabetes)
-print("Converting to binary classification...")
+# 2. CONVERSÃO PARA CLASSIFICAÇÃO BINÁRIA
+# O dataset original possui 3 classes (0: saudável, 1: pré-diabetes, 2: diabetes)
+# Para o estudo binário, agrupamos 1 e 2 como 'Risco/Diabetes' (1)
+print("Convertendo para classificação binária (0: Saudável, 1: Risco/Diabetes)...")
 df['Diabetes_Binary'] = df['Diabetes_012'].replace({2: 1})
 y = df['Diabetes_Binary']
 X = df.drop(['Diabetes_012', 'Diabetes_Binary'], axis=1)
 
-# 3. Feature Engineering
-print("Feature engineering...")
-X['BMI_Age'] = X['BMI'] * X['Age']
-X['HighBP_HighChol'] = X['HighBP'] * X['HighChol']
-X['GenHlth_PhysHlth'] = X['GenHlth'] * X['PhysHlth']
+# 3. ENGENHARIA DE ATRIBUTOS (Feature Engineering)
+# Conforme seção 4.3 do artigo, criamos variáveis sintéticas para capturar interações entre fatores de risco
+print("Executando engenharia de atributos...")
+X['BMI_Age'] = X['BMI'] * X['Age']               # Interação entre IMC e Faixa Etária
+X['HighBP_HighChol'] = X['HighBP'] * X['HighChol'] # Risco cardiovascular acumulado (Pressão Alta + Colesterol)
+X['GenHlth_PhysHlth'] = X['GenHlth'] * X['PhysHlth'] # Relação entre percepção de saúde e incapacidade física
 
-# 4. Preprocessing
-# Split data
+# 4. PRÉ-PROCESSAMENTO
+# Divisão Estratificada: Mantém a proporção das classes nos conjuntos de treino (80%) e teste (20%)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-# Scaling
+# Normalização: Essencial para Redes Neurais. Garante que todos os atributos estejam na mesma escala (Média 0, Desvio 1)
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-# 5. Build MLP Model
+# 5. CONSTRUÇÃO DA ARQUITETURA DA REDE NEURAL (MLP)
+# Conforme seção 5 do artigo, a rede possui 6 camadas ocultas para extração progressiva de características
 model = Sequential([
     Input(shape=(X_train_scaled.shape[1],)),
-    Dense(512, activation='relu'),
+    
+    # Camadas de Alta Capacidade: Capturam relações complexas iniciais
+    # Definição de Neurônios: 1024 em cada uma das duas primeiras camadas
+    # Função de Ativação 'ReLU': Introduz não-linearidade e evita o problema do desaparecimento do gradiente
+    Dense(1024, activation='relu'),
+    BatchNormalization(), # Estabiliza o treinamento e acelera a convergência
+    Dropout(0.4),        # Regularização: Desliga 40% dos neurônios aleatoriamente para evitar Overfitting (quando o modelo "decora" os dados de treino e perde a capacidade de generalizar para novos dados)
+    
+    Dense(1024, activation='relu'),
     BatchNormalization(),
     Dropout(0.4),
+    
+    # Camadas de Compressão Progressiva: Reduzem a dimensionalidade para extrair fatores latentes
+    Dense(512, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.3),
     
     Dense(256, activation='relu'),
     BatchNormalization(),
@@ -54,53 +78,70 @@ model = Sequential([
     
     Dense(64, activation='relu'),
     BatchNormalization(),
+    Dropout(0.2),
     
-    Dense(1, activation='sigmoid') # Binary output
+    # Camada de Saída: 1 Neurônio com ativação 'Sigmoid'
+    # Importância: Transforma a saída em uma probabilidade entre 0 e 1 para classificação binária
+    Dense(1, activation='sigmoid')
 ])
 
+# Otimizador 'Adam': Um algoritmo inteligente que ajusta a velocidade do aprendizado para cada peso da rede.
+# Loss 'binary_crossentropy': Mede o erro para decisões binárias (Sim/Não).
+# AUC-ROC: Mede a capacidade do modelo de separar as classes. Diferente da acurácia, o AUC é robusto contra bases desequilibradas.
 model.compile(optimizer='adam',
               loss='binary_crossentropy',
               metrics=['accuracy', tf.keras.metrics.AUC(name='auc')])
 
-# 6. Train Model
-print("Starting training...")
+# Profundidade da Rede: Total de 6 camadas ocultas + 1 de saída (Rede Profunda/Deep Learning)
+print(f"Modelo construído com {model.count_params()} parâmetros treináveis.")
+
+# 6. TREINAMENTO
+# Callbacks: Funções que monitoram e ajustam o treinamento automaticamente
+# EarlyStopping (Parada Antecipada): Interrompe o treino se o erro de validação parar de cair, evitando desperdício de tempo e overfitting
 early_stopping = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
+
+# ReduceLROnPlateau (Redução de Taxa de Aprendizado em Planaltos): Diminui o "tamanho do passo" (learning rate) se o modelo parar de evoluir
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
 
+print("Iniciando treinamento (estimado em ~130 segundos)...")
 history = model.fit(X_train_scaled, y_train,
-                    epochs=100,
-                    batch_size=256,
-                    validation_split=0.1,
+                    epochs=100,      # Épocas: Número total de vezes que o modelo verá todo o conjunto de dados
+                    batch_size=256,  # Batch Size: Número de amostras processadas antes de atualizar os pesos da rede
+                    validation_split=0.1, # Parte dos dados (10%) usada para testar o modelo DURANTE o treino
                     callbacks=[early_stopping, reduce_lr],
                     verbose=1)
 
-# 7. Evaluate
-print("\nEvaluating model...")
+# 7. AVALIAÇÃO E RESULTADOS
+print("\nAvaliação final no conjunto de teste:")
 loss, accuracy, auc = model.evaluate(X_test_scaled, y_test)
-print(f"Test Accuracy: {accuracy*100:.2f}%")
-print(f"Test AUC: {auc:.4f}")
+print(f"Acurácia Global: {accuracy*100:.2f}% (Meta do Artigo: ~85.19%)")
+print(f"AUC-ROC: {auc:.4f} (Meta do Artigo: 0.82)")
 
-# 8. Save Model and Scaler
-print("Saving model and scaler...")
+# 8. SALVAMENTO DOS ARTEFATOS
+print("\nSalvando modelo e scaler para uso na aplicação web...")
 model.save('diabetes_binary_mlp_model.keras')
 joblib.dump(scaler, 'scaler.joblib')
 
-# Predictions and Report
+# Relatório de Classificação Detalhado
 y_pred = (model.predict(X_test_scaled) > 0.5).astype(int)
-print("\nClassification Report:")
+print("\nRelatório de Classificação:")
 print(classification_report(y_test, y_pred))
 
-# Save history plot
+# Plotagem do Histórico de Treinamento
 def plot_history(history):
     plt.figure(figsize=(12, 4))
     plt.subplot(1, 2, 1)
-    plt.plot(history.history['accuracy'], label='Train Accuracy')
-    plt.plot(history.history['val_accuracy'], label='Val Accuracy')
+    plt.plot(history.history['accuracy'], label='Treino (Acc)')
+    plt.plot(history.history['val_accuracy'], label='Validação (Acc)')
+    plt.title('Evolução da Acurácia')
     plt.legend()
+    
     plt.subplot(1, 2, 2)
-    plt.plot(history.history['loss'], label='Train Loss')
-    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.plot(history.history['loss'], label='Treino (Loss)')
+    plt.plot(history.history['val_loss'], label='Validação (Loss)')
+    plt.title('Evolução da Perda')
     plt.legend()
-    plt.savefig('training_history_binary.png')
+    plt.savefig('history_plot.png') # Nome do arquivo conforme citado no artigo
 
 plot_history(history)
+print("\nTreinamento concluído. Gráfico salvo como 'history_plot.png'.")
