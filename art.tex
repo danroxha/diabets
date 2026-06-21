@@ -120,9 +120,9 @@ O \emph{Diabetes Health Indicators Dataset} é uma versão tratada dos dados do 
 Para explora a influência da interação entre os fatores de risco, são construídas três variáveis derivadas. A variável \texttt{BMI\_Age} associa o IMC às faixas etárias do indivíduo. A variável \texttt{HighBP\_HighChol} funde os dois fatores de risco com maior implicação na gênese da DC para representar o risco cardiovascular acumulado. Finalmente, a variável \texttt{GenHlth\_PhysHlth} explora a saúde subjetiva e objetiva da amostra, estabelecendo uma relação entre a autoperceção da saúde geral e os dias reportados de incapacidade física.
 
 \section{Arquitetura da rede neural proposta}\label{arquitetura-da-rede-neural-proposta}
-O classificador é uma rede sequencial de seis camadas ocultas implementada em TensorFlow [2], com mais de 2 milhões de parâmetros treináveis. As duas primeiras camadas possuem 1024 neurônios cada e têm por objetivo capturar as relações iniciais do espaço de características [5]. As camadas subsequentes realizam uma compressão progressiva dos dados para 512, 256, 128 e 64 neurônios, extraindo os fatores latentes mais importantes para a tarefa de classificação binária. Para normalizar os gradientes e impedir o sobreajuste, empregou-se \emph{BatchNormalization} após cada camada oculta, além de camadas de \emph{Dropout} com taxas decrescentes entre 40\% e 20\%. A convergência foi auxiliada pelo \emph{callback ReduceLROnPlateau}, que diminui a taxa de aprendizado ao detectar que a perda estabilizou.
+O classificador é uma rede sequencial de seis camadas ocultas implementada em TensorFlow [2], com cerca de 1,8 milhão de parâmetros treináveis. As duas primeiras camadas possuem 1024 neurônios cada e têm por objetivo capturar as relações iniciais do espaço de características [5]. As camadas subsequentes realizam uma compressão progressiva dos dados para 512, 256, 128 e 64 neurônios, extraindo os fatores latentes mais importantes para a tarefa de classificação binária. Para normalizar os gradientes e impedir o sobreajuste, empregou-se \emph{BatchNormalization} após cada camada oculta, além de camadas de \emph{Dropout} com taxas decrescentes entre 40\% e 20\%. A convergência foi auxiliada pelo \emph{callback ReduceLROnPlateau}, que diminui a taxa de aprendizado ao detectar que a perda estabilizou.
 
-\section{Resultados e análise visual}\label{resultados-e-anuxe1lise-visual}
+\section{Resultados e análise}\label{resultados-e-anuxe1lise}
 O treinamento durou 130, 64 segundos e foi interrompido na 36ª época através do mecanismo de \emph{Early Stopping}.
 
 \subsection{Resumo dos indicadores de desempenho}\label{resumo-dos-indicadores-de-desempenho}
@@ -135,11 +135,27 @@ Métrica & Valor Obtido & Definição \\
 \endhead
 \textbf{Acurácia Global} & 85,19\% & Fração de predições corretas total. \\
 \textbf{AUC-ROC} & 0,8222 & Capacidade de distinguir entre as classes. \\
-\textbf{Average Precision (AP)} & 0,4600 & Precisão média ponderada na classe minoritária. \\
-\textbf{Tempo de Inferência} & \textless{} 10ms & Tempo médio de resposta por amostra. \\
+\textbf{Average Precision} & 0,4600 & Precisão média na classe minoritária. \\
+\textbf{Latência Média} & 745,21 ms & Tempo médio de resposta por requisição. \\
+\textbf{Throughput} & 39,46 req/s & Requisições processadas por segundo. \\
 \bottomrule
-\caption{Métricas globais de desempenho do classificador MLP.}
+\caption{Métricas de desempenho do classificador e da API sob estresse (30 conexões).}
 \end{longtable}
+
+
+Para validar a escalabilidade da solução e o comportamento da API em cenários de concorrência, submeteu-se a aplicação \emph{diabetes-app} a um teste de estresse utilizando a ferramenta \texttt{autocannon}. 
+
+O cenário de teste foi configurado com os seguintes parâmetros:
+\begin{itemize}
+    \item \textbf{Concorrência:} 30 conexões simultâneas mantidas constante.
+    \item \textbf{Duração:} 20 segundos de execução contínua.
+    \item \textbf{Método:} HTTP POST, com o corpo da requisição formatado como \texttt{application/x-www-form-urlencoded}, replicando fielmente o comportamento esperado da interface web do usuário.
+\end{itemize}
+
+Os resultados obtidos indicam que, sob estas condições de carga, a aplicação apresentou uma latência média de 745,21 ms e um \emph{throughput} (taxa de transferência) de 39,46 requisições por segundo. 
+
+É importante notar que, embora a inferência isolada do modelo de rede neural ocorra em tempo inferior a 25 ms, o tempo total de resposta de 745,21 ms reflete o \emph{overhead} da infraestrutura do servidor web, o processamento de serialização dos dados e a contenção de recursos sob concorrência. Estes dados demonstram a capacidade de escalabilidade do protótipo, ao mesmo tempo que evidenciam a necessidade de futuras otimizações de \emph{backend} para suportar picos de tráfego intensos.
+
 
 \subsection{Convergência e aprendizado}\label{converguxeancia-e-aprendizado}
 
